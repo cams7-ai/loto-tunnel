@@ -46,7 +46,7 @@ class SshIntegrationTest {
         transport.open(profile, network).use { ssh ->
             assertTrue(ssh.alive)
             try { transport.open(profile, network); fail("Occupied remote listener must fail") }
-            catch (e: TunnelFailure) { assertFalse(e.retryable); assertTrue(e.message!!.contains("Encaminhamento")) }
+            catch (e: TunnelFailure) { assertFalse(e.retryable); assertTrue(e.message!!.contains("Encaminhamento")); assertTrue(e.forwardingRejected) }
             ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { target ->
                 val echo = CompletableFuture.runAsync { target.accept().use { s ->
                     val payload = s.getInputStream().readNBytes(4)
@@ -82,5 +82,19 @@ class SshIntegrationTest {
             }
         }
         transport.open(profile, network).use { assertTrue(it.alive) } // listener released
+        if (System.getenv("LOTO_TEST_RECOVERY") == "1") {
+            // The fixture permits only the exact command and kills only its own listener.
+            transport.open(profile, network).use {
+                transport.recoverAndOpen(profile, network).use { recovered -> assertTrue(recovered.alive) }
+            }
+            try {
+                transport.recoverAndOpen(profile, network).close()
+                fail("An unsuccessful remote command must remain visible")
+            } catch (failure: TunnelFailure) {
+                assertFalse(failure.retryable)
+                assertTrue(failure.message!!.contains("Não foi possível confirmar"))
+            }
+            transport.open(profile, network).use { assertTrue(it.alive) }
+        }
     }
 }

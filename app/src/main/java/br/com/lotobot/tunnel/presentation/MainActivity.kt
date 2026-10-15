@@ -85,7 +85,7 @@ class MainActivity : ComponentActivity() {
         }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).imePadding().verticalScroll(screenScroll).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             when (destination) {
-                0 -> ConnectionScreen(state.copy(profile = profile), history, { permission.launch(Manifest.permission.POST_NOTIFICATIONS); vm.connect() }, vm::disconnect, vm::refresh, { settingsEditor = "Rede"; destination = 2 }, copy)
+                0 -> ConnectionScreen(state.copy(profile = profile), history, { permission.launch(Manifest.permission.POST_NOTIFICATIONS); vm.connect() }, vm::disconnect, vm::recover, vm::refresh, { settingsEditor = "Rede"; destination = 2 }, copy)
                 1 -> LogsScreen(history, vm::clear, copy)
                 2 -> SettingsScreen(vm, profile, state, settingsEditor) { settingsEditor = it }
             }
@@ -109,7 +109,7 @@ class MainActivity : ComponentActivity() {
         Text(text, color = if (error) Color(0xFFC62828) else Color(0xFFB85C00), modifier = Modifier.fillMaxWidth().padding(16.dp))
     }
 }
-@Composable private fun ConnectionScreen(s: TunnelSnapshot, h: HistorySnapshot, connect: () -> Unit, disconnect: () -> Unit, refresh: () -> Unit, networkSettings: () -> Unit, copy: (String, String) -> Unit) {
+@Composable private fun ConnectionScreen(s: TunnelSnapshot, h: HistorySnapshot, connect: () -> Unit, disconnect: () -> Unit, recover: () -> Unit, refresh: () -> Unit, networkSettings: () -> Unit, copy: (String, String) -> Unit) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(1000); now = System.currentTimeMillis() } }
     val active = s.status !in setOf(TunnelStatus.DISCONNECTED, TunnelStatus.ERROR)
@@ -139,6 +139,10 @@ class MainActivity : ComponentActivity() {
         Text("Dados móveis: ↑ ${bytes(h.mobile.sent)}  ↓ ${bytes(h.mobile.received)}")
     }
     s.lastFailure?.let { Notice("Última falha: $it", true) }
+    if (s.status == TunnelStatus.ERROR && s.forwardingRejected) {
+        Notice("Liberar a porta encerra todos os processos que usam ${s.profile.remotePort}/tcp no servidor ${s.profile.host}, inclusive outros túneis ou serviços. Use apenas se puder interrompê-los.")
+        OutlinedButton(onClick = recover, modifier = Modifier.fillMaxWidth()) { Text("Liberar porta e reconectar") }
+    }
     if (s.status == TunnelStatus.WAITING) Notice("O aplicativo tentará conectar quando uma rede permitida com acesso ao servidor estiver disponível.")
     Button(onClick = if (active) disconnect else connect, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
         Text(if (s.status in setOf(TunnelStatus.WAITING, TunnelStatus.RECONNECTING)) "Cancelar reconexão" else if (active) "Desconectar" else "Conectar")

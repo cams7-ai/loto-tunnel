@@ -32,6 +32,7 @@ class ServiceControl(private val app: Application, private val profiles: Profile
     private fun command(action: String) { ContextCompat.startForegroundService(app, Intent(app, TunnelService::class.java).setAction(action)) }
     override fun connect() = command(TunnelService.CONNECT)
     override fun retry() = command(TunnelService.RETRY)
+    override fun recover() = command(TunnelService.RECOVER)
     override fun disconnect() = command(TunnelService.DISCONNECT)
     override fun refreshIpv6() = command(TunnelService.REFRESH)
     override fun changeProfile(profile: Profile) { profiles.save(profile); command(TunnelService.CHANGE) }

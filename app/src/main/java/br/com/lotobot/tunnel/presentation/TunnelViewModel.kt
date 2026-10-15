@@ -22,6 +22,7 @@ class TunnelViewModel(
     private val messageFlow = MutableStateFlow<String?>(null)
     val message = messageFlow.asStateFlow()
     fun connect() = safely { control.connect() }
+    fun recover() = safely { control.recover() }
     fun disconnect() = safely { control.disconnect() }
     fun refresh() = safely { control.refreshIpv6() }
     fun save(profile: Profile) = safely {

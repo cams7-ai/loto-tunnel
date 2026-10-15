@@ -1,3 +1,12 @@
+# Recuperação da porta remota — 15/10/2026
+
+- Implementado o botão **Liberar porta e reconectar** após recusa de encaminhamento remoto, com aviso de encerramento de todos os processos que usam a porta configurada.
+- `scripts/test-ssh-local.sh`: **19 testes JVM, zero falhas e zero skips**, APK debug, Android Lint e verificação de arquitetura concluídos com `BUILD SUCCESSFUL`.
+- Novos testes do coordenador verificam ação disponível apenas após a falha adequada, ausência de execução duplicada, cancelamento e falha de recuperação sem repetição automática.
+- O teste OpenSSH real usa `ForceCommand` em um servidor descartável para validar o comando exato enviado pelo aplicativo e executar `fuser` somente sobre a porta temporária desse servidor, sem sudo. Comprova encerramento do listener anterior, criação do novo túnel e exibição de erro quando o comando retorna código diferente de zero.
+- Não foram executados testes desta funcionalidade no celular físico/EC2 nem alterações de sudo no servidor real. A autorização sudo sem senha e a interação com o novo botão precisam ser verificadas nesse ambiente, conforme o [guia](TESTE_LOCAL_ANDROID_STUDIO.md#liberar-a-porta-pelo-celular).
+- APK: `app/build/outputs/apk/debug/app-debug.apk`. A validação anterior abaixo descreve outra versão do APK e preserva seu registro histórico.
+
 # Validação executada em 14/10/2026
 
 A implementação interrompida foi retomada, completando transporte SSH, serviço/DI, interface, testes, documentação e APK. Este relatório distingue testes locais executados de validações que exigem o celular/EC2.

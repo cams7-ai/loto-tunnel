@@ -13,6 +13,7 @@ class TunnelCoordinator(
 ) {
     private sealed interface Command {
         data object Connect : Command
+        data object Recover : Command
         data object Retry : Command
         data class Disconnect(val completed: CompletableDeferred<Unit>? = null) : Command
         data class Change(val profile: Profile) : Command
@@ -33,13 +34,24 @@ class TunnelCoordinator(
                         val error = profile.validate()
                         if (error != null) mutable.update { it.copy(status = TunnelStatus.ERROR, lastFailure = error, profile = profile) }
                         else {
-                            mutable.update { it.copy(lastFailure = null) }
+                            mutable.update { it.copy(lastFailure = null, forwardingRejected = false) }
                             history.resetSessionTotals()
                             worker = launch { runTunnel(profile) }
                         }
                     }
+                    Command.Recover -> {
+                        if (mutable.value.status == TunnelStatus.ERROR && mutable.value.forwardingRejected) {
+                            worker?.cancelAndJoin()
+                            val profile = profiles.selected.value
+                            // Never recover a different profile from the one that failed.
+                            if (profile == mutable.value.profile && profile.validate() == null) {
+                                mutable.update { it.copy(status = TunnelStatus.RECONNECTING, lastFailure = null, forwardingRejected = false) }
+                                worker = launch { runTunnel(profile, recoverPort = true) }
+                            }
+                        }
+                    }
                     Command.Retry -> {
-                        mutable.update { it.copy(lastFailure = null) }
+                        mutable.update { it.copy(lastFailure = null, forwardingRejected = false) }
                         worker?.cancelAndJoin(); worker = null
                         ipJob?.cancelAndJoin()
                         val profile = profiles.selected.value
@@ -74,6 +86,7 @@ class TunnelCoordinator(
         }
     }
     fun connect() { commands.trySend(Command.Connect) }
+    fun recover() { commands.trySend(Command.Recover) }
     fun retry() { commands.trySend(Command.Retry) }
     fun disconnect() { commands.trySend(Command.Disconnect()) }
     suspend fun disconnectAndAwait() {
@@ -89,7 +102,8 @@ class TunnelCoordinator(
         val id = NetworkPolicy.choose(profile.mode, candidates.map { it.id to it.kind }, current?.id, timing.now() - wifiSince >= 15_000)
         return candidates.find { it.id == id }
     }
-    private suspend fun runTunnel(profile: Profile) {
+    private suspend fun runTunnel(profile: Profile, recoverPort: Boolean = false) {
+        var recoveryPending = recoverPort
         val blocked = mutableMapOf<String, Long>()
         var current: NetworkLease? = null
         var wifiSince = timing.now()
@@ -110,7 +124,13 @@ class TunnelCoordinator(
                 refresh(selected)
                 try {
                     history.event("Conectando por ${selected.label}; tentativa ${attempt + 1}.")
-                    ssh.open(profile, selected).use { session ->
+                    val recovering = recoveryPending
+                    recoveryPending = false // Destructive command runs only once per explicit action.
+                    val connection = if (recovering) {
+                        history.event("Liberação solicitada pelo usuário para a porta remota ${profile.remotePort}/tcp.")
+                        ssh.recoverAndOpen(profile, selected)
+                    } else ssh.open(profile, selected)
+                    connection.use { session ->
                         mutable.update { it.copy(status = TunnelStatus.CONNECTED, connectedAt = timing.now(), attempt = 0) }
                         history.event("Servidor aceitou 127.0.0.1:${profile.remotePort}. Túnel conectado; saída SOCKS5 ainda requer validação.")
                         attempt = 0
@@ -130,7 +150,7 @@ class TunnelCoordinator(
                 catch (failure: Exception) {
                     val message = failure.message ?: "Falha no túnel SSH."
                     history.event(message)
-                    mutable.update { it.copy(lastFailure = message, connectedAt = null) }
+                    mutable.update { it.copy(lastFailure = message, connectedAt = null, forwardingRejected = (failure as? TunnelFailure)?.forwardingRejected == true) }
                     if (failure is TunnelFailure && !failure.retryable) {
                         mutable.update { it.copy(status = TunnelStatus.ERROR) }; return
                     }

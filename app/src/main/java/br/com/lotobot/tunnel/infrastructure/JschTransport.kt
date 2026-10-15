@@ -13,10 +13,12 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resumeWithException
 
-/** The remote listener is a SOCKS5 endpoint, interpreted on this device. No shell/PTY. */
+/** The remote listener is a SOCKS5 endpoint, interpreted on this device. Exec only for explicit port recovery; no PTY. */
 class JschTransport(private val credentials: CredentialStore, private val trust: HostTrust,
                     private val history: ConnectionHistory) : SshTransport {
-    override suspend fun open(profile: Profile, network: NetworkLease): SshConnection = suspendCancellableCoroutine { continuation ->
+    override suspend fun open(profile: Profile, network: NetworkLease): SshConnection = openSession(profile, network, false)
+    override suspend fun recoverAndOpen(profile: Profile, network: NetworkLease): SshConnection = openSession(profile, network, true)
+    private suspend fun openSession(profile: Profile, network: NetworkLease, recover: Boolean): SshConnection = suspendCancellableCoroutine { continuation ->
         val owner = OwnedSession()
         continuation.invokeOnCancellation { owner.close() }
         workers.execute {
@@ -58,10 +60,23 @@ class JschTransport(private val credentials: CredentialStore, private val trust:
                 val deadline = deadlines.schedule({ owner.close() }, profile.timeoutSeconds.toLong(), TimeUnit.SECONDS)
                 try { session.connect(profile.timeoutSeconds * 1000) } finally { deadline.cancel(false) }
                 if (owner.closed) { session.disconnect(); throw TunnelFailure("Tempo limite na conexão/negociação inicial SSH.") }
+                if (recover) releaseRemotePort(session, profile, owner)
                 // want_reply=true; JSch bounds the global request wait to approximately 10 s.
-                session.setPortForwardingR("127.0.0.1", profile.remotePort, SocksDaemon::class.java.name,
-                    arrayOf(Socks5({ host, port -> network.connect(host, port, profile.timeoutSeconds * 1000) },
-                        history, network.kind, owner::register, owner::unregister), owner))
+                var forwardAttempt = 0
+                while (true) {
+                    if (owner.closed) throw CancellationException()
+                    try {
+                        session.setPortForwardingR("127.0.0.1", profile.remotePort, SocksDaemon::class.java.name,
+                            arrayOf(Socks5({ host, port -> network.connect(host, port, profile.timeoutSeconds * 1000) },
+                                history, network.kind, owner::register, owner::unregister), owner))
+                        break
+                    } catch (error: JSchException) {
+                        // fuser can return before the killed process's listener is released.
+                        // Retry only the forwarding request, never the destructive command.
+                        if (!recover || !error.message.orEmpty().contains("remote port forwarding", true) || forwardAttempt++ >= 5) throw error
+                        Thread.sleep(200)
+                    }
+                }
                 jsch.removeAllIdentity()
                 continuation.resume(owner) { _, connection, _ -> connection.close() }
             } catch (error: Exception) {
@@ -79,13 +94,38 @@ class JschTransport(private val credentials: CredentialStore, private val trust:
                         causes.any { it is ConnectException } -> TunnelFailure("Conexão TCP recusada pelo servidor SSH.")
                         causes.any { it is SocketTimeoutException } -> TunnelFailure("Tempo limite ao alcançar ou negociar com o servidor SSH na rede selecionada.")
                         message.contains("Auth fail", true) -> TunnelFailure("Autenticação recusada. Confira usuário, chave e senha.", false)
-                        message.contains("remote port forwarding", true) -> TunnelFailure("Encaminhamento remoto recusado para SOCKS5 em 127.0.0.1:${profile.remotePort}. Verifique se a porta está ocupada por outra sessão/proxy ou se o SSH permite encaminhamento remoto. Libere a sessão anterior ou escolha outra porta SOCKS5 em Ajustes. O IPv6 público não determina esse erro.", false)
+                        message.contains("remote port forwarding", true) -> TunnelFailure("Encaminhamento remoto recusado para SOCKS5 em 127.0.0.1:${profile.remotePort}. Verifique se a porta está ocupada por outra sessão/proxy ou se o SSH permite encaminhamento remoto. Use Liberar porta e reconectar se puder encerrar os processos dessa porta, ou escolha outra porta SOCKS5 em Ajustes. O IPv6 público não determina esse erro.", false, forwardingRejected = true)
                         else -> TunnelFailure("Falha de SSH/rota na rede selecionada: ${error.javaClass.simpleName}.")
                     }
                     continuation.resumeWithException(translated)
                 }
             }
         }
+    }
+    private fun releaseRemotePort(session: Session, profile: Profile, owner: OwnedSession) {
+        require(profile.remotePort in 1..65535)
+        val channel = session.openChannel("exec") as ChannelExec
+        val resource = Closeable { channel.disconnect() }
+        owner.register(resource)
+        try {
+            // Numeric port only; no host/user/other shell input. -n never prompts for sudo's password.
+            channel.setCommand("sudo -n fuser -k ${profile.remotePort}/tcp >/dev/null 2>&1")
+            channel.setInputStream(null)
+            channel.setOutputStream(OutputStream.nullOutputStream())
+            channel.setErrStream(OutputStream.nullOutputStream())
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(profile.timeoutSeconds.toLong())
+            channel.connect(profile.timeoutSeconds * 1000)
+            while (!channel.isClosed) {
+                if (owner.closed) throw CancellationException()
+                if (System.nanoTime() >= deadline) throw TunnelFailure("Tempo limite ao liberar a porta remota. Confira o servidor antes de tentar novamente.", false)
+                Thread.sleep(50)
+            }
+            if (channel.exitStatus != 0) throw TunnelFailure("Não foi possível confirmar a liberação da porta ${profile.remotePort}/tcp (código ${channel.exitStatus}). O servidor precisa de fuser e permissão sudo sem senha para esse comando; a porta também pode já estar livre. Tente Conectar ou consulte o administrador.", false)
+            history.event("Comando de liberação da porta ${profile.remotePort}/tcp concluído; solicitando encaminhamento SSH novamente.")
+        } catch (failure: TunnelFailure) { throw failure }
+        catch (cancel: CancellationException) { throw cancel }
+        catch (_: Exception) { throw TunnelFailure("Não foi possível executar a liberação remota. Confira se o SSH permite comandos e se sudo/fuser estão disponíveis.", false) }
+        finally { resource.close(); owner.unregister(resource) }
     }
     companion object { private val deadlines = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "ssh-deadline").apply { isDaemon = true } }; private val workers = Executors.newCachedThreadPool { r -> Thread(r, "ssh-open").apply { isDaemon = true } } }
 }

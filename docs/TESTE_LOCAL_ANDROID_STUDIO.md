@@ -240,7 +240,7 @@ Quando o teste Android já tiver terminado, execute:
 ./scripts/test-ssh-local.sh
 ```
 
-Esse script não precisa do emulador. Ele cria um OpenSSH temporário, roda os **16 testes JVM**, compila o APK, executa Android Lint e confere a arquitetura.
+Esse script não precisa do emulador. Ele cria um OpenSSH temporário, roda os **19 testes JVM**, compila o APK, executa Android Lint e confere a arquitetura.
 
 **Resultado esperado:** `BUILD SUCCESSFUL`, sem falhas nos testes. Avisos do Lint não são o mesmo que erros. O relatório fica em `app/build/reports/lint-results-debug.html`.
 
@@ -640,7 +640,17 @@ Para investigar sem encerrar processos:
 6. Ajuste os clientes do proxy para a mesma porta. Por exemplo, se escolheu `1081`, use `socks5h://127.0.0.1:1081` nos comandos executados no servidor.
 7. Use **Atualizar IPv6** para obter uma consulta atual antes de comparar com uma requisição através do SOCKS5.
 
-O aplicativo não encerra processos remotos automaticamente. Se a porta estiver livre, confira as permissões de encaminhamento SSH descritas no [README](../README.md).
+#### Liberar a porta pelo celular
+
+Após uma falha de encaminhamento remoto, a tela **Conexão** oferece **Liberar porta e reconectar**. Leia o aviso antes de tocar: essa ação encerra **todos os processos que usam a porta TCP configurada no perfil no servidor**, inclusive túneis ou serviços de terceiros. Ela não identifica a sessão anterior do aparelho.
+
+A ação usa o host, usuário, chave, identidade SSH verificada e rede do perfil. Executa `sudo -n fuser -k PORTA/tcp` e, se o comando terminar com sucesso, solicita novamente o encaminhamento na mesma conexão SSH. `PORTA` é a porta SOCKS5 salva (por exemplo, `1080`), não a porta SSH. A liberação só ocorre por toque explícito após a falha; Conectar e reconexões comuns não executam esse comando.
+
+O servidor precisa permitir execução de comandos SSH, ter `fuser` instalado e permitir `sudo` sem senha para o comando. Se necessário, o administrador pode configurar uma regra restrita ao usuário, caminho real do executável e porta autorizada; não conceda sudo irrestrito ao aplicativo. Não é necessário informar senha de sudo no celular.
+
+Ao contrário do comando de terminal com `|| true`, o aplicativo informa falhas, recusa de execução e tempo limite. Código diferente de zero também pode indicar que a porta já estava livre: tente **Conectar**. Se o encaminhamento continuar recusado, confira as permissões SSH no [README](../README.md).
+
+Para validar, use um servidor e uma porta dedicados: ocupe a porta com um processo descartável, tente conectar, confira o erro e o botão, toque em **Liberar porta e reconectar** e confira **Conectado** e os eventos em **Logs → Túnel SSH**. Repita sem autorização sudo: deve aparecer uma falha, sem repetição automática da liberação. Não use a porta de serviços necessários para esse teste.
 
 ### 8.9. Escolher dados móveis no celular
 

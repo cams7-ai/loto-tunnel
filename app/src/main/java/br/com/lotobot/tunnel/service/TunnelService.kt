@@ -38,6 +38,7 @@ class TunnelService : Service() {
         when (intent?.action) {
             CONNECT -> coordinator.connect()
             RETRY -> coordinator.retry()
+            RECOVER -> coordinator.recover()
             DISCONNECT -> scope.launch { coordinator.disconnectAndAwait(); stopSelf(startId) }
             REFRESH -> coordinator.refreshIpv6()
             CHANGE -> coordinator.changeProfile(graph.profiles.selected.value)
@@ -60,7 +61,7 @@ class TunnelService : Service() {
         super.onDestroy()
     }
     companion object {
-        const val RETRY = "tunnel.retry"; const val CONNECT = "tunnel.connect"; const val DISCONNECT = "tunnel.disconnect"
+        const val RECOVER = "tunnel.recover"; const val RETRY = "tunnel.retry"; const val CONNECT = "tunnel.connect"; const val DISCONNECT = "tunnel.disconnect"
         const val REFRESH = "tunnel.refresh"; const val CHANGE = "tunnel.change"
     }
 }

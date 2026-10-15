@@ -38,6 +38,7 @@ interface HostTrust {
 interface SshConnection : Closeable { val alive: Boolean }
 interface SshTransport {
     suspend fun open(profile: Profile, network: NetworkLease): SshConnection
+    suspend fun recoverAndOpen(profile: Profile, network: NetworkLease): SshConnection
 }
 interface ConnectionHistory {
     val state: StateFlow<HistorySnapshot>
@@ -54,6 +55,7 @@ interface TunnelControl {
     fun connect()
     fun disconnect()
     fun retry()
+    fun recover()
     fun changeProfile(profile: Profile)
     fun refreshIpv6()
 }

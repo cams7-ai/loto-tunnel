@@ -21,7 +21,12 @@ class CoordinatorTest {
         override fun close() {}
     }
     private class Transport : SshTransport {
+        var holdRecovery = false; var recoveries = 0; var recoveryFailure: Exception? = null
         var opens = 0; var active = 0; var maxActive = 0; var failure: Exception? = null; var hold = false
+        override suspend fun recoverAndOpen(profile: Profile, network: NetworkLease): SshConnection {
+            recoveries++; if (holdRecovery) awaitCancellation(); recoveryFailure?.let { throw it }; failure = null
+            return open(profile, network)
+        }
         override suspend fun open(profile: Profile, network: NetworkLease): SshConnection {
             opens++; failure?.let { throw it }; if (hold) awaitCancellation()
             active++; maxActive = maxOf(maxActive, active)
@@ -33,6 +38,38 @@ class CoordinatorTest {
         override fun now() = testScheduler.currentTime
         override suspend fun waitMillis(millis: Long) = delay(millis)
     })
+    @Test fun recoveryRequiresForwardingFailureAndRunsOnlyOnce() = runTest {
+        val ssh = Transport(); val c = coordinator(ssh, Networks())
+        c.recover(); runCurrent(); assertEquals(0, ssh.recoveries)
+        ssh.failure = TunnelFailure("forward denied", false, forwardingRejected = true)
+        c.connect(); runCurrent(); assertTrue(c.state.value.forwardingRejected)
+        repeat(3) { c.recover() }; runCurrent()
+        assertEquals(1, ssh.recoveries); assertEquals(TunnelStatus.CONNECTED, c.state.value.status)
+        assertFalse(c.state.value.forwardingRejected)
+        c.disconnect(); runCurrent()
+    }
+    @Test fun disconnectCancelsRecoveryWithoutReconnecting() = runTest {
+        val ssh = Transport().apply {
+            failure = TunnelFailure("forward denied", false, forwardingRejected = true)
+            holdRecovery = true
+        }
+        val c = coordinator(ssh, Networks())
+        c.connect(); runCurrent(); c.recover(); runCurrent()
+        c.disconnect(); runCurrent(); advanceTimeBy(120000); runCurrent()
+        assertEquals(1, ssh.recoveries); assertEquals(1, ssh.opens)
+        assertEquals(TunnelStatus.DISCONNECTED, c.state.value.status)
+    }
+    @Test fun recoveryFailureIsVisibleAndDoesNotRepeatCommand() = runTest {
+        val ssh = Transport().apply {
+            failure = TunnelFailure("forward denied", false, forwardingRejected = true)
+            recoveryFailure = TunnelFailure("sudo refused", false)
+        }
+        val c = coordinator(ssh, Networks())
+        c.connect(); runCurrent(); c.recover(); runCurrent()
+        advanceTimeBy(120000); runCurrent()
+        assertEquals(1, ssh.recoveries); assertEquals("sudo refused", c.state.value.lastFailure)
+        assertEquals(TunnelStatus.ERROR, c.state.value.status)
+    }
     @Test fun repeatedConnectAndManualDisconnectDoNotDuplicateOrRestart() = runTest {
         val ssh = Transport(); val net = Networks(); val c = coordinator(ssh, net)
         repeat(5) { c.connect() }; runCurrent()

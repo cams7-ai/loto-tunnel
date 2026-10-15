@@ -26,7 +26,7 @@ data class TunnelSnapshot(
     val status: TunnelStatus = TunnelStatus.DISCONNECTED, val profile: Profile = Profile(),
     val networkId: String? = null, val network: NetworkKind? = null, val networkLabel: String? = null,
     val connectedAt: Long? = null, val attempt: Int = 0, val lastFailure: String? = null,
-    val ipv6: PublicIpv6 = PublicIpv6()
+    val ipv6: PublicIpv6 = PublicIpv6(), val forwardingRejected: Boolean = false
 )
 enum class ConnectionState(val label: String) { CONNECTING("Conectando"), CONNECTED("Conectado"), CLOSED("Encerrado"), ERROR("Erro") }
 data class Usage(
@@ -38,7 +38,7 @@ data class SshEvent(val at: Long, val message: String)
 data class Traffic(val sent: Long = 0, val received: Long = 0)
 data class HistorySnapshot(val connections: List<Usage> = emptyList(), val events: List<SshEvent> = emptyList(), val wifi: Traffic = Traffic(), val mobile: Traffic = Traffic())
 data class HostChallenge(val host: String, val port: Int, val algorithm: String, val fingerprint: String, val key: String)
-class TunnelFailure(message: String, val retryable: Boolean = true) : Exception(message)
+class TunnelFailure(message: String, val retryable: Boolean = true, val forwardingRejected: Boolean = false) : Exception(message)
 object ReconnectPolicy { fun delayMillis(attempt: Int): Long = (1000L shl attempt.coerceIn(0, 6)).coerceAtMost(60_000L) }
 object NetworkPolicy {
     fun choose(mode: NetworkMode, candidates: List<Pair<String, NetworkKind>>, current: String?, wifiStable: Boolean): String? {
