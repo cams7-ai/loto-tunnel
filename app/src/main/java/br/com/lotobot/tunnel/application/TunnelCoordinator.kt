@@ -33,6 +33,7 @@ class TunnelCoordinator(
                         val error = profile.validate()
                         if (error != null) mutable.update { it.copy(status = TunnelStatus.ERROR, lastFailure = error, profile = profile) }
                         else {
+                            mutable.update { it.copy(lastFailure = null) }
                             history.resetSessionTotals()
                             worker = launch { runTunnel(profile) }
                         }
@@ -139,8 +140,9 @@ class TunnelCoordinator(
                 }
             }
         } finally {
-            ipJob?.cancel()
-            mutable.update { it.copy(connectedAt = null, ipv6 = it.ipv6.copy(stale = true)) }
+            // IPv6 is a network diagnostic, independent of SSH authentication/forwarding.
+            // Explicit disconnect/profile changes cancel it through the command actor.
+            mutable.update { it.copy(connectedAt = null) }
         }
     }
     private fun refresh(lease: NetworkLease) {

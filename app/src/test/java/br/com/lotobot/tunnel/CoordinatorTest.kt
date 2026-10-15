@@ -4,6 +4,7 @@ import br.com.lotobot.tunnel.application.*
 import br.com.lotobot.tunnel.domain.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.*
 import org.junit.Test
 import org.junit.Assert.*
@@ -68,5 +69,32 @@ class CoordinatorTest {
     @Test fun permanentErrorsDoNotRetry() = runTest {
         val ssh = Transport().apply { failure = TunnelFailure("authentication", false) }; val c = coordinator(ssh, Networks())
         c.connect(); runCurrent(); advanceTimeBy(120000); runCurrent(); assertEquals(TunnelStatus.ERROR, c.state.value.status); assertEquals(1, ssh.opens)
+    }
+    @Test fun forwardingFailureDoesNotCancelIndependentIpv6Diagnostic() = runTest {
+        val ssh = Transport().apply { failure = TunnelFailure("Porta 1080 ocupada", false) }
+        val c = coordinator(ssh, Networks())
+        c.connect(); runCurrent()
+        assertEquals(TunnelStatus.ERROR, c.state.value.status)
+        val snapshot = withContext(Dispatchers.Default) {
+            withTimeout(5000) { c.state.first { it.ipv6.address != null && !it.ipv6.stale } }
+        }
+        assertEquals("2606:4700:4700::1111", snapshot.ipv6.address)
+        assertEquals("Porta 1080 ocupada", snapshot.lastFailure)
+        ssh.failure = null
+        c.connect(); runCurrent()
+        assertEquals(TunnelStatus.CONNECTED, c.state.value.status)
+        assertNull(c.state.value.lastFailure)
+        c.disconnect(); runCurrent()
+    }
+    @Test fun mobileModeSelectsMobileEvenWhenWifiIsAvailable() = runTest {
+        val ssh = Transport(); val net = Networks()
+        net.networks.value = listOf(Lease("w", NetworkKind.WIFI), Lease("m", NetworkKind.MOBILE))
+        val c = coordinator(ssh, net)
+        c.changeProfile(Profile(host = "::1", keyImported = true, mode = NetworkMode.MOBILE)); runCurrent()
+        c.connect(); runCurrent()
+        assertEquals(TunnelStatus.CONNECTED, c.state.value.status)
+        assertEquals(NetworkKind.MOBILE, c.state.value.network)
+        assertEquals("m", c.state.value.networkId)
+        c.disconnect(); runCurrent()
     }
 }

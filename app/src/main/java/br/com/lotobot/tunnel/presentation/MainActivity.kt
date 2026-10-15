@@ -71,6 +71,7 @@ class MainActivity : ComponentActivity() {
     val challenge by vm.hostChallenge.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
     var destination by rememberSaveable { mutableIntStateOf(0) }
+    var settingsEditor by rememberSaveable { mutableStateOf("Perfil SSH") }
     val screenScroll = rememberScrollState()
     LaunchedEffect(destination) { screenScroll.scrollTo(0) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -84,9 +85,9 @@ class MainActivity : ComponentActivity() {
         }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).imePadding().verticalScroll(screenScroll).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             when (destination) {
-                0 -> ConnectionScreen(state.copy(profile = profile), history, { permission.launch(Manifest.permission.POST_NOTIFICATIONS); vm.connect() }, vm::disconnect, vm::refresh, copy)
+                0 -> ConnectionScreen(state.copy(profile = profile), history, { permission.launch(Manifest.permission.POST_NOTIFICATIONS); vm.connect() }, vm::disconnect, vm::refresh, { settingsEditor = "Rede"; destination = 2 }, copy)
                 1 -> LogsScreen(history, vm::clear, copy)
-                2 -> SettingsScreen(vm, profile, state)
+                2 -> SettingsScreen(vm, profile, state, settingsEditor) { settingsEditor = it }
             }
         }
     }
@@ -108,7 +109,7 @@ class MainActivity : ComponentActivity() {
         Text(text, color = if (error) Color(0xFFC62828) else Color(0xFFB85C00), modifier = Modifier.fillMaxWidth().padding(16.dp))
     }
 }
-@Composable private fun ConnectionScreen(s: TunnelSnapshot, h: HistorySnapshot, connect: () -> Unit, disconnect: () -> Unit, refresh: () -> Unit, copy: (String, String) -> Unit) {
+@Composable private fun ConnectionScreen(s: TunnelSnapshot, h: HistorySnapshot, connect: () -> Unit, disconnect: () -> Unit, refresh: () -> Unit, networkSettings: () -> Unit, copy: (String, String) -> Unit) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(1000); now = System.currentTimeMillis() } }
     val active = s.status !in setOf(TunnelStatus.DISCONNECTED, TunnelStatus.ERROR)
@@ -117,11 +118,14 @@ class MainActivity : ComponentActivity() {
         Text(s.status.label, style = MaterialTheme.typography.titleLarge, color = if (success) Color(0xFF00866A) else Color(0xFFB85C00), modifier = Modifier.fillMaxWidth().padding(16.dp))
     }
     Panel(s.profile.name) { Text(s.profile.user); Text(s.profile.host.ifBlank { "Configure o host SSH em Ajustes." }, fontFamily = FontFamily.Monospace); Text("Porta SSH ${s.profile.port} • SOCKS5 127.0.0.1:${s.profile.remotePort}") }
-    Panel("Rede") { Text(s.networkLabel ?: "Nenhuma rede em uso pelo túnel"); Text("Modo: ${s.profile.mode.label}") }
+    Panel("Rede") {
+        Text(s.networkLabel ?: "Nenhuma rede em uso pelo túnel"); Text("Modo: ${s.profile.mode.label}")
+        OutlinedButton(onClick = networkSettings, modifier = Modifier.fillMaxWidth()) { Text("Escolher Wi-Fi ou dados móveis") }
+    }
     Panel("IPv6 público") {
         Text(s.ipv6.address ?: "Indisponível", style = MaterialTheme.typography.titleLarge, fontFamily = FontFamily.Monospace)
         Text(s.ipv6.networkLabel ?: "Selecione uma rede em Ajustes.")
-        if (s.ipv6.stale && s.ipv6.address != null) Notice("Endereço desatualizado; atualize antes de validar.")
+        if (s.ipv6.stale && s.ipv6.address != null) Notice("IPv6 da consulta anterior; atualize para comparar com a saída SOCKS5. Este aviso não impede a conexão SSH.")
         s.ipv6.error?.let { Notice(it) }
         Text("Última consulta: ${s.ipv6.updatedAt?.let(::date) ?: "—"}")
         OutlinedButton(colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary), onClick = { s.ipv6.address?.let { copy("IPv6", it) } }, enabled = s.ipv6.address != null && !s.ipv6.stale, modifier = Modifier.fillMaxWidth()) { Text("Copiar IPv6") }
@@ -145,9 +149,8 @@ class MainActivity : ComponentActivity() {
         singleLine = true, visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = KeyboardOptions(keyboardType = if (numeric) KeyboardType.Number else if (password) KeyboardType.Password else KeyboardType.Text))
 }
-@Composable private fun SettingsScreen(vm: TunnelViewModel, profile: Profile, s: TunnelSnapshot) {
+@Composable private fun SettingsScreen(vm: TunnelViewModel, profile: Profile, s: TunnelSnapshot, editor: String, changeEditor: (String) -> Unit) {
     val profiles by vm.allProfiles.collectAsStateWithLifecycle()
-    var editor by rememberSaveable { mutableStateOf("Perfil SSH") }
     var name by remember(profile) { mutableStateOf(profile.name) }
     var host by remember(profile) { mutableStateOf(profile.host) }
     var user by remember(profile) { mutableStateOf(profile.user) }
@@ -163,7 +166,7 @@ class MainActivity : ComponentActivity() {
     fun draft() = profile.copy(name = name.trim(), host = host.trim(), user = user.trim(), port = port.toIntOrNull() ?: 0, remotePort = remote.toIntOrNull() ?: 0,
         timeoutSeconds = timeout.toIntOrNull() ?: 0, keepaliveSeconds = keepalive.toIntOrNull() ?: 0, missedKeepalives = missed.toIntOrNull() ?: 0, mode = mode)
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { vm.importKey(it, draft(), password); password = "" } }
-    Select("Configuração", listOf("Perfil SSH", "Rede"), editor) { editor = it }
+    Select("Configuração", listOf("Perfil SSH", "Rede"), editor, changeEditor)
     if (editor == "Perfil SSH") {
         Panel("Perfil SSH") {
             Select("Perfil selecionado", profiles.map { it.name + " • " + it.id.take(8) }, profile.name + " • " + profile.id.take(8)) { label -> vm.select(profiles.first { it.name + " • " + it.id.take(8) == label }) }

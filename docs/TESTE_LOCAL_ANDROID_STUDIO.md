@@ -10,6 +10,8 @@ Você vai abrir o aplicativo num celular virtual, executar testes e, se desejar,
 
 A sequência recomendada é: **etapas 1–5 para conhecer a interface**, **etapa 6 para validar automaticamente** e **etapa 7 para praticar o túnel manualmente**. A etapa manual é opcional, mas permite observar a conexão enquanto você usa o aplicativo.
 
+**Já instalou o aplicativo no celular e conectou por USB?** Vá direto à [etapa 8: consultar e salvar logs](#8-consultar-e-salvar-logs-no-celular-por-usb). Não é necessário reinstalar o aplicativo nem executar os testes do emulador para consultar os logs.
+
 > O emulador usa a conectividade oferecida pelo computador. Esse teste local não comprova a saída pela operadora de um celular físico. O IPv6 externo também depende da conectividade do computador.
 
 ## 1. Abrir o projeto certo
@@ -238,7 +240,7 @@ Quando o teste Android já tiver terminado, execute:
 ./scripts/test-ssh-local.sh
 ```
 
-Esse script não precisa do emulador. Ele cria um OpenSSH temporário, roda os **14 testes JVM**, compila o APK, executa Android Lint e confere a arquitetura.
+Esse script não precisa do emulador. Ele cria um OpenSSH temporário, roda os **16 testes JVM**, compila o APK, executa Android Lint e confere a arquitetura.
 
 **Resultado esperado:** `BUILD SUCCESSFUL`, sem falhas nos testes. Avisos do Lint não são o mesmo que erros. O relatório fica em `app/build/reports/lint-results-debug.html`.
 
@@ -455,7 +457,143 @@ Exclua o perfil de teste em Ajustes se não for reutilizá-lo. Isso remove a cha
 
 **Se repetir o teste manual com uma nova chave de servidor:** o aplicativo pode bloquear a mudança de identidade em `10.0.2.2:22222`, mesmo após excluir o perfil. Isso é a proteção de host funcionando. Você pode usar outro par host/porta de teste, por exemplo mudar `Port 22222` no arquivo temporário para `Port 22224` e ajustar a porta no perfil, conferindo novamente a nova impressão digital. Outra opção, somente no emulador descartável, é limpar os dados do aplicativo nas configurações Android; isso remove todos os seus perfis, credenciais e histórico naquele emulador.
 
-## 8. Consultar erros no Android Studio
+## 8. Consultar e salvar logs no celular por USB
+
+Este passo a passo considera que o **LotoBot Tunnel já está instalado no celular físico** e que o aparelho está conectado ao computador por um cabo USB que permite transferência de dados.
+
+Há dois lugares para consultar os registros:
+
+| Onde consultar | O que encontrar |
+| --- | --- |
+| **Logs**, dentro do LotoBot Tunnel | Eventos do túnel SSH e registros de uso do SOCKS5 |
+| **Logcat**, no Android Studio ou pelo terminal | Mensagens de diagnóstico do Android, exceções e falhas do aplicativo |
+
+### 8.1. Autorizar a depuração USB no celular
+
+1. Desbloqueie o celular e abra **Configurações**.
+2. Se **Opções do desenvolvedor** ainda não estiver disponível, entre em **Sobre o telefone** e toque sete vezes em **Número da versão** ou **Número de compilação**. Em alguns aparelhos, esse item fica em **Informações do software**. Confirme o PIN se solicitado.
+3. Volte às configurações e abra **Opções do desenvolvedor**. Use a busca das configurações se necessário.
+4. Ative **Depuração USB**.
+5. Com o cabo conectado, aceite no celular a pergunta **Permitir depuração USB?**, conferindo que o computador é o seu. A opção de autorizar sempre é opcional.
+6. Mantenha o celular desbloqueado até confirmar a conexão no próximo passo.
+
+Os nomes e caminhos desses menus variam conforme o fabricante e a versão do Android.
+
+### 8.2. Confirmar que o computador reconheceu o celular
+
+No Android Studio, abra **View → Tool Windows → Terminal** e execute:
+
+```bash
+export PATH="/home/cams7/Android/Sdk/platform-tools:$PATH"
+adb devices -l
+```
+
+Se o SDK estiver em outro caminho, use o **Android SDK Location** mostrado em **Tools → SDK Manager**.
+
+Exemplo de resultado:
+
+```text
+List of devices attached
+ABC123456    device product:exemplo model:Meu_Celular device:exemplo transport_id:1
+```
+
+**Resultado esperado:** a linha do celular contém `device`. Anote o identificador da primeira coluna; no exemplo, é `ABC123456`.
+
+| Resultado | Como resolver |
+| --- | --- |
+| `unauthorized` | Desbloqueie o celular e aceite a autorização de depuração USB. Execute o comando novamente. |
+| `offline` | Reconecte o cabo, aguarde alguns segundos e execute o comando novamente. |
+| Nenhum aparelho listado | Confira Depuração USB, teste outro cabo de dados e outra porta USB. Se necessário, selecione Transferência de arquivos na notificação USB do celular. |
+| `no permissions` | Verifique as permissões USB/regras udev para dispositivos Android no Linux e reconecte o aparelho após a correção. |
+| Celular e emulador listados juntos | Selecione o celular no Logcat e use o identificador dele nos comandos abaixo. |
+
+### 8.3. Acompanhar os logs no Android Studio
+
+1. Abra o projeto **loto-tunnel** no Android Studio, se ainda não estiver aberto.
+2. Abra o **LotoBot Tunnel no celular**. Não é necessário clicar em Run.
+3. Na IDE, acesse **View → Tool Windows → Logcat**. Se não encontrar, pressione **Ctrl+Shift+A**, procure `Logcat` e abra a ferramenta.
+4. No seletor de dispositivo **da janela Logcat**, escolha o modelo do seu celular. Confira o identificador se houver mais de um aparelho.
+5. No campo de consulta do Logcat, digite:
+
+   ```text
+   package:br.com.lotobot.tunnel
+   ```
+
+6. Se a ferramenta oferecer um seletor de processo, escolha **br.com.lotobot.tunnel**.
+7. Confirme que a exibição está acompanhando novas mensagens; retome a atualização se estiver pausada.
+8. No celular, repita a ação que deseja investigar, como tocar em **Conectar** ou **Atualizar IPv6**.
+9. Observe as mensagens no horário da ação. Se o aplicativo fechar, procure **FATAL EXCEPTION**, **AndroidRuntime** e o texto da exceção.
+
+Para mostrar somente erros do pacote, substitua a consulta por:
+
+```text
+package:br.com.lotobot.tunnel level:ERROR
+```
+
+Depois, volte à consulta apenas com `package:` para acompanhar também os outros níveis. Uma janela vazia não comprova que houve falha: o aplicativo pode não emitir mensagens no Logcat durante aquela ação. Consulte também os registros internos descritos a seguir.
+
+### 8.4. Consultar e copiar os logs dentro do aplicativo
+
+1. No celular, abra **LotoBot Tunnel → Logs**.
+2. Toque em **Túnel SSH** para consultar eventos da sessão e mensagens sobre a conexão.
+3. Toque em **Uso do SOCKS5** para consultar os destinos acessados pelo proxy, com estado, rede e contadores de tráfego.
+4. Use **Mostrar filtros** para restringir os registros. Se faltar um evento esperado, confira os filtros e o período selecionado.
+5. Se a atualização visual estiver pausada, toque em **Retomar atualização**. A pausa da tela não interrompe a coleta dos registros.
+6. Para copiar o conteúdo exibido, toque em **Copiar registros filtrados**. Cole o texto em um editor ou outro aplicativo no celular e transfira para o computador pelo método de sua preferência. Repita para a outra aba, se necessário.
+
+Os registros copiados respeitam a aba e os filtros selecionados. O histórico SOCKS5 depende de requisições feitas através do proxy; apenas conectar o SSH ou consultar IPv6 pelo botão do aplicativo não gera necessariamente um registro de uso do SOCKS5.
+
+### 8.5. Acompanhar e salvar o Logcat pelo terminal
+
+Esta alternativa usa o mesmo celular autorizado nas etapas anteriores. No Terminal, prepare o caminho do ADB e informe **o identificador real do seu celular**, substituindo `ABC123456`:
+
+```bash
+export PATH="/home/cams7/Android/Sdk/platform-tools:$PATH"
+LOTO_DEVICE_SERIAL='ABC123456'
+```
+
+**Acompanhar somente o processo do aplicativo:** abra o LotoBot Tunnel no celular e execute:
+
+```bash
+LOTO_APP_PID="$(adb -s "$LOTO_DEVICE_SERIAL" shell pidof -s br.com.lotobot.tunnel)"
+if [ -n "$LOTO_APP_PID" ]; then
+  adb -s "$LOTO_DEVICE_SERIAL" logcat --pid="$LOTO_APP_PID" -v threadtime
+else
+  echo 'Aplicativo sem processo ativo. Abra o LotoBot Tunnel no celular e repita este bloco.'
+fi
+```
+
+Repita a ação no celular e acompanhe o terminal. Pressione **Ctrl+C** para parar a leitura; isso não desconecta o túnel. Se o aplicativo fechar e abrir novamente, execute o bloco outra vez, pois o identificador do processo pode mudar.
+
+**Salvar uma coleta durante a reprodução do problema:** execute o bloco abaixo antes de repetir a ação no celular:
+
+```bash
+mkdir -p /tmp/lotobot-logs
+LOTO_LOG_FILE="/tmp/lotobot-logs/logcat-$(date +%Y%m%d-%H%M%S).txt"
+echo "Salvando em: $LOTO_LOG_FILE"
+adb -s "$LOTO_DEVICE_SERIAL" logcat -b all -v threadtime > "$LOTO_LOG_FILE"
+```
+
+Após reproduzir o problema, pressione **Ctrl+C**. Abra o caminho informado em um editor de texto. Essa coleta inclui os buffers acessíveis de todo o dispositivo, o que permite acompanhar também uma reinicialização do processo. Ela pode conter registros de outros aplicativos; revise o conteúdo antes de compartilhar.
+
+**Consultar falhas recentes já registradas pelo Android:**
+
+```bash
+adb -s "$LOTO_DEVICE_SERIAL" logcat -b crash -d -v threadtime
+```
+
+O comando termina sozinho. O buffer de falhas pode conter erros de outros aplicativos ou estar vazio. Confira o pacote/processo e o horário. Os buffers do Android são limitados: uma falha antiga pode já ter sido descartada; nesse caso, inicie uma coleta e reproduza novamente.
+
+Esses comandos consultam o Logcat. Para copiar o histórico interno de SSH/SOCKS5, use **Copiar registros filtrados** no aplicativo, conforme a etapa 8.4.
+
+### 8.6. O que registrar para investigar um problema
+
+1. Anote o horário aproximado e a ação realizada.
+2. Anote a rede usada, **Wi-Fi** ou **dados móveis**, e o estado exibido pelo aplicativo.
+3. Copie os eventos de **Logs → Túnel SSH**; para problemas de tráfego, copie também **Uso do SOCKS5**.
+4. Se houve fechamento inesperado, salve o Logcat incluindo a exceção e suas linhas seguintes.
+
+### 8.7. Outros erros durante os testes no emulador
 
 ### Erros ao compilar
 
@@ -464,7 +602,7 @@ Abra **View → Tool Windows → Build** e selecione a compilação que falhou. 
 ### Aplicativo fechou inesperadamente
 
 1. Abra **View → Tool Windows → Logcat**.
-2. Selecione o emulador e o processo/pacote **br.com.lotobot.tunnel**.
+2. Selecione o dispositivo usado no teste e o processo/pacote **br.com.lotobot.tunnel**.
 3. No campo de consulta, use:
 
    ```text
@@ -474,6 +612,50 @@ Abra **View → Tool Windows → Build** e selecione a compilação que falhou. 
 4. Procure **FATAL EXCEPTION** ou mensagens **AndroidRuntime** próximas do momento da falha.
 
 Os destinos SOCKS5 e eventos de sessão são mostrados principalmente nas abas **Logs do aplicativo**, não no Logcat. [Referência oficial de Logcat](https://developer.android.com/studio/debug/logcat).
+
+### 8.8. IPv6 aparece, mas a conexão só funciona após liberar a porta 1080
+
+**IPv6 público**, **Host SSH** e **porta SOCKS5 remota** representam coisas diferentes:
+
+- O IPv6 público é consultado pela rede do celular para comparar a saída de tráfego.
+- O Host SSH identifica o servidor ao qual o aplicativo se conecta.
+- A porta SOCKS5 remota, normalmente `1080`, precisa estar disponível no servidor para que ele aceite a escuta em `127.0.0.1:1080`.
+
+Um IPv6 público visível e um host correto não garantem que a porta remota esteja livre. Nas versões anteriores, a falha de conexão SSH também invalidava a consulta de IPv6, produzindo o aviso **Endereço desatualizado; atualize antes de validar**. Esse aviso não era a causa que impedia o SSH de conectar. A versão corrigida mantém a consulta de IPv6 independente da falha SSH e informa a porta solicitada no erro de encaminhamento remoto.
+
+Se liberar a porta com `sudo fuser -k 1080/tcp` resolveu o problema, isso é um indício de que outra sessão ou proxy estava ocupando a porta. Esse comando encerra os processos que usam a porta; não o use como rotina automática de conexão. Além disso, `>/dev/null 2>&1 || true` oculta erros e impede confirmar pelo resultado do comando se a liberação realmente ocorreu.
+
+Para investigar sem encerrar processos:
+
+1. No celular, abra **Logs → Túnel SSH** e procure a mensagem de encaminhamento remoto recusado.
+2. No terminal conectado ao servidor SSH, execute:
+
+   ```bash
+   sudo ss -lntp 'sport = :1080'
+   ```
+
+3. Confira o processo/PID informado. Se for uma sessão de teste anterior, desconecte-a pelo aplicativo ou pelo terminal que a iniciou. Se a sessão perdeu a rede abruptamente, aguarde a liberação pelo servidor e confira novamente.
+4. Se a porta pertence a outro serviço que precisa continuar ativo, use uma porta livre, por exemplo `1081`, em **Ajustes → Perfil SSH → Porta SOCKS5 remota**, e toque em **Salvar perfil**. As permissões de encaminhamento do servidor precisam permitir essa porta.
+5. Toque em **Conectar**. Confira **Conectado** e o evento de aceite de `127.0.0.1:1080` (ou da porta escolhida) no histórico SSH.
+6. Ajuste os clientes do proxy para a mesma porta. Por exemplo, se escolheu `1081`, use `socks5h://127.0.0.1:1081` nos comandos executados no servidor.
+7. Use **Atualizar IPv6** para obter uma consulta atual antes de comparar com uma requisição através do SOCKS5.
+
+O aplicativo não encerra processos remotos automaticamente. Se a porta estiver livre, confira as permissões de encaminhamento SSH descritas no [README](../README.md).
+
+### 8.9. Escolher dados móveis no celular
+
+Na versão que já possui o atalho, abra **Conexão → Escolher Wi-Fi ou dados móveis**. Se esse botão não aparecer na versão instalada, siga o caminho pelo seletor:
+
+1. Abra **Ajustes** na barra inferior do LotoBot Tunnel.
+2. No topo, toque em **Configuração: Perfil SSH**; esse botão abre uma lista.
+3. Selecione **Rede**. As opções de rede ficam nessa página, fora do formulário de host/chave.
+4. Marque **Somente dados móveis** para exigir a rede da operadora, ou **Automático** para priorizar Wi-Fi e permitir a rede móvel.
+5. Toque em **Salvar configuração**. Trocar o modo com o túnel ativo encerra as conexões anteriores e tenta conectar pela rede permitida.
+6. Nas configurações rápidas do Android, habilite **Dados móveis** e confira que o SIM possui acesso à internet. Habilitar Wi-Fi não habilita os dados móveis.
+7. Volte a **Conexão** e confira **Modo: Somente dados móveis**. Toque em **Conectar**, se estiver desconectado.
+8. Confira se a rede usada pelo túnel indica **Dados móveis**. Se permanecer em **Aguardando rede**, teste desligar temporariamente o Wi-Fi para verificar a disponibilidade da rede móvel e confirme o acesso pela operadora.
+
+Os três modos são exibidos mesmo sem uma rede móvel disponível. Se **Rede** ou **Somente dados móveis** não aparecer, compare a versão instalada com o APK compilado deste projeto; a versão instalada pode ser anterior. Para testar a correção, atualize com um APK assinado pela mesma chave, preservando os dados do aplicativo. Não desinstale para diagnosticar: isso remove perfis e credenciais.
 
 ### Problemas frequentes
 

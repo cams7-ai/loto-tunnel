@@ -79,7 +79,7 @@ class JschTransport(private val credentials: CredentialStore, private val trust:
                         causes.any { it is ConnectException } -> TunnelFailure("Conexão TCP recusada pelo servidor SSH.")
                         causes.any { it is SocketTimeoutException } -> TunnelFailure("Tempo limite ao alcançar ou negociar com o servidor SSH na rede selecionada.")
                         message.contains("Auth fail", true) -> TunnelFailure("Autenticação recusada. Confira usuário, chave e senha.", false)
-                        message.contains("remote port forwarding", true) -> TunnelFailure("Encaminhamento remoto recusado: porta ocupada, sem permissão ou sem resposta do servidor.", false)
+                        message.contains("remote port forwarding", true) -> TunnelFailure("Encaminhamento remoto recusado para SOCKS5 em 127.0.0.1:${profile.remotePort}. Verifique se a porta está ocupada por outra sessão/proxy ou se o SSH permite encaminhamento remoto. Libere a sessão anterior ou escolha outra porta SOCKS5 em Ajustes. O IPv6 público não determina esse erro.", false)
                         else -> TunnelFailure("Falha de SSH/rota na rede selecionada: ${error.javaClass.simpleName}.")
                     }
                     continuation.resumeWithException(translated)
