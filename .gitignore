@@ -1,0 +1,29 @@
+# Caches e saídas de compilação
+.gradle/
+.gradle-local/
+.kotlin/
+**/build/
+
+# Configurações locais do Android Studio e do SDK
+.idea/
+*.iml
+local.properties
+
+# Pacotes gerados e diagnósticos locais
+*.apk
+*.aab
+*.apks
+*.hprof
+*.log
+
+# Chaves, certificados privados e credenciais locais
+*.pem
+*.key
+*.jks
+*.keystore
+*.p12
+*.pfx
+/.aws/
+
+# docs/*.png e capturas/ são referências e evidências documentadas do projeto.
+# Manter o Gradle Wrapper (incluindo gradle-wrapper.jar) versionado.

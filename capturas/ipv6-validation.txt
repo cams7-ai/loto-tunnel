@@ -1,0 +1,4 @@
+Android emulator Wi-Fi, local OpenSSH remote listener
+Direct: 2804:1b3:c401:13d9:3a98:3150:1597:1e04
+SOCKS: 2804:1b3:c401:13d9:3a98:3150:1597:1e04
+Normalized equality: PASS
